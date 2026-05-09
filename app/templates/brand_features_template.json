@@ -1,0 +1,18 @@
+{
+  "brand_name": "YourBrand",
+  "brand_description": "a leading platform that helps users accomplish X, Y, and Z",
+  "writing_context": "Write for professionals in the field. Assume technical familiarity but explain jargon.",
+  "model_id": "gemini-2.5-pro",
+  "features": [
+    {
+      "name": "Feature One",
+      "description": "One sentence describing what Feature One does.",
+      "trigger_topics": ["keyword1", "keyword2", "use case description"]
+    },
+    {
+      "name": "Feature Two",
+      "description": "One sentence describing what Feature Two does.",
+      "trigger_topics": ["keyword3", "keyword4", "another use case"]
+    }
+  ]
+}

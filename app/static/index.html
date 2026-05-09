@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FAQ 生成系统</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f6fa; color: #1a1a2e; min-height: 100vh; }
+  a { color: inherit; text-decoration: none; }
+
+  /* Layout */
+  .header { background: #fff; border-bottom: 1px solid #e8eaf0; padding: 0 32px; height: 56px; display: flex; align-items: center; gap: 16px; }
+  .header-logo { font-size: 18px; font-weight: 700; color: #4f46e5; }
+  .header-breadcrumb { font-size: 14px; color: #888; display: flex; align-items: center; gap: 8px; }
+  .header-breadcrumb .sep { color: #ccc; }
+  .header-breadcrumb .crumb { cursor: pointer; }
+  .header-breadcrumb .crumb:hover { color: #4f46e5; }
+  .container { max-width: 960px; margin: 0 auto; padding: 32px 24px; }
+
+  /* Page visibility */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* Cards */
+  .card { background: #fff; border-radius: 12px; border: 1px solid #e8eaf0; padding: 24px; }
+  .card + .card { margin-top: 16px; }
+
+  /* Project grid */
+  .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-top: 24px; }
+  .project-card { background: #fff; border-radius: 12px; border: 1px solid #e8eaf0; padding: 20px; cursor: pointer; transition: all .15s; }
+  .project-card:hover { border-color: #4f46e5; box-shadow: 0 4px 16px rgba(79,70,229,.08); transform: translateY(-2px); }
+  .project-card h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+  .project-card .meta { font-size: 12px; color: #888; }
+  .new-project-card { border: 2px dashed #d0d4e8; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: #888; min-height: 100px; }
+  .new-project-card:hover { border-color: #4f46e5; color: #4f46e5; }
+  .new-project-card .plus { font-size: 28px; line-height: 1; }
+
+  /* Forms */
+  .form-group { margin-bottom: 20px; }
+  .form-group label { display: block; font-size: 13px; font-weight: 600; color: #444; margin-bottom: 6px; }
+  .form-group input[type=text], .form-group input[type=number] { width: 100%; padding: 10px 12px; border: 1px solid #d0d4e8; border-radius: 8px; font-size: 14px; outline: none; transition: border-color .15s; }
+  .form-group input:focus { border-color: #4f46e5; }
+  .upload-area { border: 2px dashed #d0d4e8; border-radius: 8px; padding: 20px; text-align: center; cursor: pointer; transition: all .15s; position: relative; }
+  .upload-area:hover, .upload-area.dragover { border-color: #4f46e5; background: #f5f3ff; }
+  .upload-area input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+  .upload-area .upload-text { font-size: 14px; color: #666; pointer-events: none; }
+  .upload-area .upload-file-name { font-size: 13px; color: #4f46e5; font-weight: 500; margin-top: 4px; }
+  .template-link { font-size: 12px; color: #4f46e5; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; }
+  .template-link:hover { text-decoration: underline; }
+
+  /* Buttons */
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; border: none; transition: all .15s; }
+  .btn-primary { background: #4f46e5; color: #fff; }
+  .btn-primary:hover { background: #4338ca; }
+  .btn-primary:disabled { background: #a5b4fc; cursor: not-allowed; }
+  .btn-secondary { background: #f0f0f8; color: #4f46e5; border: 1px solid #d0d4e8; }
+  .btn-secondary:hover { background: #e8e8f8; }
+  .btn-danger { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+  .btn-danger:hover { background: #fee2e2; }
+  .btn-sm { padding: 6px 12px; font-size: 13px; }
+  .btn-back { background: none; color: #888; font-size: 14px; gap: 4px; padding: 0; }
+  .btn-back:hover { color: #4f46e5; }
+
+  /* Tabs */
+  .tabs { display: flex; border-bottom: 2px solid #e8eaf0; margin-bottom: 24px; }
+  .tab { padding: 10px 20px; font-size: 14px; font-weight: 500; color: #888; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all .15s; }
+  .tab.active { color: #4f46e5; border-bottom-color: #4f46e5; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Progress */
+  .progress-wrap { margin: 16px 0; }
+  .progress-bar-bg { background: #e8eaf0; border-radius: 999px; height: 10px; overflow: hidden; }
+  .progress-bar-fill { background: #4f46e5; height: 100%; border-radius: 999px; transition: width .4s ease; }
+  .progress-text { font-size: 13px; color: #555; margin-top: 8px; }
+  .status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+  .status-pending   { background: #f3f4f6; color: #6b7280; }
+  .status-running   { background: #eff6ff; color: #2563eb; }
+  .status-completed { background: #f0fdf4; color: #16a34a; }
+  .status-partial   { background: #fffbeb; color: #d97706; }
+  .status-failed    { background: #fef2f2; color: #dc2626; }
+
+  /* Alert */
+  .alert { padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
+  .alert-error { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+  .alert-success { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+  .alert-info { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+
+  /* Config status pills */
+  .config-status { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .dot-green { background: #22c55e; }
+  .dot-red { background: #ef4444; }
+
+  /* Slider */
+  .slider-row { display: flex; align-items: center; gap: 12px; }
+  .slider-row input[type=range] { flex: 1; }
+  .slider-val { font-size: 14px; font-weight: 600; color: #4f46e5; min-width: 32px; text-align: right; }
+
+  /* Steps checkboxes */
+  .steps-group { display: flex; gap: 16px; flex-wrap: wrap; }
+  .step-check { display: flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; }
+  .step-check input { width: 16px; height: 16px; accent-color: #4f46e5; }
+
+  /* Jobs history */
+  .jobs-list { margin-top: 20px; }
+  .job-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f0f0f8; font-size: 13px; }
+  .job-row:last-child { border-bottom: none; }
+  .job-time { color: #888; min-width: 80px; }
+
+  /* Section title */
+  .section-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+  .section-sub { font-size: 14px; color: #888; margin-bottom: 24px; }
+
+  /* Spinner */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(79,70,229,.3); border-top-color: #4f46e5; border-radius: 50%; animation: spin .7s linear infinite; }
+
+  /* Divider */
+  .divider { border: none; border-top: 1px solid #e8eaf0; margin: 20px 0; }
+
+  /* Responsive */
+  @media (max-width: 600px) {
+    .container { padding: 16px; }
+    .project-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span class="header-logo">FAQ 生成系统</span>
+  <div class="header-breadcrumb" id="breadcrumb"></div>
+</div>
+
+<!-- ── Page: Home ── -->
+<div id="page-home" class="page">
+  <div class="container">
+    <div class="section-title">我的项目</div>
+    <div class="section-sub">选择已有项目开始生成，或新建项目配置品牌信息</div>
+    <div class="project-grid" id="project-grid">
+      <div class="project-card new-project-card" onclick="navigate('new')">
+        <div class="plus">＋</div>
+        <div>新建项目</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Page: New Project ── -->
+<div id="page-new" class="page">
+  <div class="container">
+    <button class="btn btn-back" onclick="navigate('home')">← 返回</button>
+    <div class="section-title" style="margin-top:16px">新建项目</div>
+    <div class="section-sub">配置完基础信息后即可开始生成FAQ内容</div>
+
+    <div class="card">
+      <div id="new-error" class="alert alert-error" style="display:none"></div>
+
+      <div class="form-group">
+        <label>项目名称 *</label>
+        <input type="text" id="new-name" placeholder="例：Hi3D FAQ 2024" />
+      </div>
+
+      <div class="form-group">
+        <label>Link Map 文件 * <span style="font-weight:400;color:#888">（定义内链目标页面）</span></label>
+        <div class="upload-area" id="linkmap-area">
+          <input type="file" id="new-linkmap" accept=".json" onchange="handleFileSelect(this,'linkmap-area','linkmap-name')" />
+          <div class="upload-text">点击或拖拽上传 linkmap.json</div>
+          <div class="upload-file-name" id="linkmap-name"></div>
+        </div>
+        <div class="template-link" onclick="downloadTemplate('linkmap_template.json')">⬇ 下载模板</div>
+      </div>
+
+      <div class="form-group">
+        <label>Brand Features 文件 * <span style="font-weight:400;color:#888">（定义品牌特性和写作规则）</span></label>
+        <div class="upload-area" id="brand-area">
+          <input type="file" id="new-brand" accept=".json" onchange="handleFileSelect(this,'brand-area','brand-name')" />
+          <div class="upload-text">点击或拖拽上传 brand_features.json</div>
+          <div class="upload-file-name" id="brand-name"></div>
+        </div>
+        <div class="template-link" onclick="downloadTemplate('brand_features_template.json')">⬇ 下载模板</div>
+      </div>
+
+      <button class="btn btn-primary" id="new-submit-btn" onclick="submitNewProject()">创建项目</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Page: Project ── -->
+<div id="page-project" class="page">
+  <div class="container">
+    <button class="btn btn-back" onclick="navigate('home')">← 所有项目</button>
+    <div class="section-title" id="proj-title" style="margin-top:16px"></div>
+
+    <div class="tabs" style="margin-top:20px">
+      <div class="tab active" onclick="switchTab('config')">配置</div>
+      <div class="tab" onclick="switchTab('generate')">生成</div>
+    </div>
+
+    <!-- Config Tab -->
+    <div class="tab-content active" id="tab-config">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div>
+            <div style="font-weight:600;margin-bottom:4px">Link Map</div>
+            <div class="config-status" id="linkmap-status"></div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+            <label class="btn btn-secondary btn-sm" style="cursor:pointer">
+              重新上传
+              <input type="file" accept=".json" style="display:none" onchange="updateConfig(this,'linkmap')" />
+            </label>
+            <div class="template-link" onclick="downloadTemplate('linkmap_template.json')">⬇ 下载模板</div>
+          </div>
+        </div>
+        <hr class="divider" />
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-weight:600;margin-bottom:4px">Brand Features</div>
+            <div class="config-status" id="brand-status"></div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+            <label class="btn btn-secondary btn-sm" style="cursor:pointer">
+              重新上传
+              <input type="file" accept=".json" style="display:none" onchange="updateConfig(this,'brand_features')" />
+            </label>
+            <div class="template-link" onclick="downloadTemplate('brand_features_template.json')">⬇ 下载模板</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px;display:flex;justify-content:flex-end">
+        <button class="btn btn-danger btn-sm" onclick="deleteProject()">删除项目</button>
+      </div>
+    </div>
+
+    <!-- Generate Tab -->
+    <div class="tab-content" id="tab-generate">
+      <div class="card" id="generate-form-card">
+        <div id="gen-error" class="alert alert-error" style="display:none"></div>
+
+        <div class="form-group">
+          <label>上传问题 Excel *</label>
+          <div class="upload-area" id="excel-area">
+            <input type="file" id="gen-excel" accept=".xlsx,.xls" onchange="handleFileSelect(this,'excel-area','excel-name')" />
+            <div class="upload-text">第一列为问题，无需表头</div>
+            <div class="upload-file-name" id="excel-name"></div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>并发数量</label>
+          <div class="slider-row">
+            <input type="range" id="workers-slider" min="1" max="100" value="50" oninput="document.getElementById('workers-val').textContent=this.value" />
+            <span class="slider-val" id="workers-val">50</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>执行步骤</label>
+          <div class="steps-group">
+            <label class="step-check"><input type="checkbox" id="step1" checked /> Step 1 生成回答</label>
+            <label class="step-check"><input type="checkbox" id="step2" checked /> Step 2 插入内链</label>
+            <label class="step-check"><input type="checkbox" id="step3" checked /> Step 3 验证</label>
+          </div>
+        </div>
+
+        <button class="btn btn-primary" id="gen-start-btn" onclick="startGeneration()">开始生成</button>
+      </div>
+
+      <!-- Progress Card -->
+      <div class="card" id="progress-card" style="display:none;margin-top:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div style="font-weight:600">生成进度</div>
+          <div id="status-badge" class="status-badge status-running"><span class="spinner"></span> 运行中</div>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress-bar-bg"><div class="progress-bar-fill" id="prog-fill" style="width:0%"></div></div>
+          <div class="progress-text" id="prog-text">准备中...</div>
+        </div>
+        <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="download-btn" style="display:none" onclick="downloadResult()">⬇ 下载结果 Excel</button>
+        </div>
+      </div>
+
+      <!-- Jobs History -->
+      <div id="jobs-history" style="margin-top:24px;display:none">
+        <div style="font-weight:600;margin-bottom:12px">历史任务</div>
+        <div class="jobs-list" id="jobs-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let currentProjectId = null;
+let currentJobId = null;
+let sseSource = null;
+
+// ── Router ─────────────────────────────────────────────────────────────────
+function navigate(route, id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  const crumb = document.getElementById('breadcrumb');
+  if (route === 'home') {
+    document.getElementById('page-home').classList.add('active');
+    crumb.innerHTML = '';
+    loadProjects();
+  } else if (route === 'new') {
+    document.getElementById('page-new').classList.add('active');
+    crumb.innerHTML = '<span class="crumb" onclick="navigate(\'home\')">所有项目</span><span class="sep">›</span>新建项目';
+    resetNewForm();
+  } else if (route === 'project') {
+    currentProjectId = id;
+    document.getElementById('page-project').classList.add('active');
+    loadProject(id);
+  }
+}
+
+window.onload = () => navigate('home');
+
+// ── Projects ───────────────────────────────────────────────────────────────
+async function loadProjects() {
+  const grid = document.getElementById('project-grid');
+  grid.innerHTML = '<div class="project-card new-project-card" onclick="navigate(\'new\')"><div class="plus">＋</div><div>新建项目</div></div>';
+  try {
+    const res = await fetch('/api/projects');
+    const projects = await res.json();
+    projects.forEach(p => {
+      const card = document.createElement('div');
+      card.className = 'project-card';
+      card.innerHTML = `<h3>${escHtml(p.name)}</h3><div class="meta">ID: ${p.id}</div>`;
+      card.onclick = () => navigate('project', p.id);
+      grid.appendChild(card);
+    });
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+async function loadProject(id) {
+  try {
+    const res = await fetch(`/api/projects/${id}`);
+    const p = await res.json();
+    document.getElementById('proj-title').textContent = p.name;
+    document.getElementById('breadcrumb').innerHTML =
+      `<span class="crumb" onclick="navigate('home')">所有项目</span><span class="sep">›</span>${escHtml(p.name)}`;
+
+    // Config status
+    setConfigStatus('linkmap-status', p.has_linkmap);
+    setConfigStatus('brand-status', p.has_brand_features);
+
+    // Jobs history
+    renderJobsHistory(p.jobs || []);
+
+    // Switch to generate tab if config is complete
+    switchTab('config');
+    if (p.has_linkmap && p.has_brand_features) {
+      document.getElementById('gen-start-btn').disabled = false;
+      document.getElementById('gen-error').style.display = 'none';
+    } else {
+      document.getElementById('gen-start-btn').disabled = true;
+    }
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+function setConfigStatus(elId, ok) {
+  const el = document.getElementById(elId);
+  el.innerHTML = ok
+    ? '<div class="dot dot-green"></div>已配置'
+    : '<div class="dot dot-red"></div>未上传';
+}
+
+function renderJobsHistory(jobs) {
+  const container = document.getElementById('jobs-history');
+  const list = document.getElementById('jobs-list');
+  if (!jobs.length) { container.style.display = 'none'; return; }
+  container.style.display = 'block';
+  list.innerHTML = jobs.slice(0, 10).map(j => `
+    <div class="job-row">
+      <span class="job-time">${fmtTime(j.created_at)}</span>
+      <span class="status-badge status-${j.status}">${statusLabel(j.status)}</span>
+      <span style="color:#555">${j.success_count}/${j.total} 题</span>
+      ${j.has_results ? `<button class="btn btn-secondary btn-sm" onclick="downloadJobResult('${j.id}')">⬇ 下载</button>` : ''}
+    </div>
+  `).join('');
+}
+
+// ── New Project ─────────────────────────────────────────────────────────────
+function resetNewForm() {
+  document.getElementById('new-name').value = '';
+  document.getElementById('new-linkmap').value = '';
+  document.getElementById('new-brand').value = '';
+  document.getElementById('linkmap-name').textContent = '';
+  document.getElementById('brand-name').textContent = '';
+  document.getElementById('new-error').style.display = 'none';
+}
+
+async function submitNewProject() {
+  const name = document.getElementById('new-name').value.trim();
+  const linkmapFile = document.getElementById('new-linkmap').files[0];
+  const brandFile = document.getElementById('new-brand').files[0];
+  const errEl = document.getElementById('new-error');
+  errEl.style.display = 'none';
+
+  if (!name) { showError(errEl, '请填写项目名称'); return; }
+  if (!linkmapFile) { showError(errEl, '请上传 linkmap.json'); return; }
+  if (!brandFile) { showError(errEl, '请上传 brand_features.json'); return; }
+
+  const btn = document.getElementById('new-submit-btn');
+  btn.disabled = true; btn.textContent = '创建中...';
+
+  const fd = new FormData();
+  fd.append('name', name);
+  fd.append('linkmap', linkmapFile);
+  fd.append('brand_features', brandFile);
+
+  try {
+    const res = await fetch('/api/projects', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) { showError(errEl, data.detail || '创建失败'); return; }
+    navigate('project', data.id);
+  } catch(e) {
+    showError(errEl, '网络错误：' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '创建项目';
+  }
+}
+
+// ── Config Updates ──────────────────────────────────────────────────────────
+async function updateConfig(input, type) {
+  const file = input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  const fieldName = type === 'linkmap' ? 'linkmap' : 'brand_features';
+  fd.append(fieldName, file);
+  try {
+    const res = await fetch(`/api/projects/${currentProjectId}/${type}`, { method: 'PUT', body: fd });
+    const data = await res.json();
+    if (res.ok) loadProject(currentProjectId);
+    else alert(data.detail || '上传失败');
+  } catch(e) {
+    alert('网络错误');
+  }
+}
+
+async function deleteProject() {
+  if (!confirm(`确认删除项目？此操作不可恢复。`)) return;
+  await fetch(`/api/projects/${currentProjectId}`, { method: 'DELETE' });
+  navigate('home');
+}
+
+// ── Generation ──────────────────────────────────────────────────────────────
+async function startGeneration() {
+  const excelFile = document.getElementById('gen-excel').files[0];
+  const errEl = document.getElementById('gen-error');
+  errEl.style.display = 'none';
+
+  if (!excelFile) { showError(errEl, '请上传 Excel 文件'); return; }
+
+  const steps = [];
+  if (document.getElementById('step1').checked) steps.push(1);
+  if (document.getElementById('step2').checked) steps.push(2);
+  if (document.getElementById('step3').checked) steps.push(3);
+  if (!steps.length) { showError(errEl, '请至少选择一个步骤'); return; }
+
+  const workers = document.getElementById('workers-slider').value;
+  const fd = new FormData();
+  fd.append('excel', excelFile);
+  fd.append('workers', workers);
+  fd.append('steps', steps.join(','));
+
+  const btn = document.getElementById('gen-start-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 提交中...';
+
+  try {
+    const res = await fetch(`/api/projects/${currentProjectId}/jobs`, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) { showError(errEl, data.detail || '提交失败'); btn.disabled = false; btn.textContent = '开始生成'; return; }
+    currentJobId = data.job_id;
+    showProgressCard(data.total);
+    startSSE(data.job_id);
+  } catch(e) {
+    showError(errEl, '网络错误：' + e.message);
+    btn.disabled = false; btn.textContent = '开始生成';
+  }
+}
+
+function showProgressCard(total) {
+  document.getElementById('progress-card').style.display = 'block';
+  document.getElementById('download-btn').style.display = 'none';
+  document.getElementById('prog-fill').style.width = '0%';
+  document.getElementById('prog-text').textContent = `0 / ${total} 题`;
+  updateStatusBadge('running');
+}
+
+function startSSE(jobId) {
+  if (sseSource) sseSource.close();
+  sseSource = new EventSource(`/api/jobs/${jobId}/stream`);
+  sseSource.onmessage = (e) => {
+    const job = JSON.parse(e.data);
+    updateProgress(job);
+    if (['completed','partial','failed'].includes(job.status)) {
+      sseSource.close();
+      document.getElementById('gen-start-btn').disabled = false;
+      document.getElementById('gen-start-btn').textContent = '开始生成';
+      loadProject(currentProjectId);
+    }
+  };
+  sseSource.onerror = () => sseSource.close();
+}
+
+function updateProgress(job) {
+  const pct = job.total ? Math.round((job.success_count + job.failed_count) / job.total * 100) : 0;
+  document.getElementById('prog-fill').style.width = pct + '%';
+  document.getElementById('prog-text').textContent =
+    `已完成 ${job.success_count + job.failed_count} / ${job.total} 题（失败 ${job.failed_count} 题）`;
+  updateStatusBadge(job.status);
+  if (job.has_results) document.getElementById('download-btn').style.display = 'inline-flex';
+}
+
+function updateStatusBadge(status) {
+  const el = document.getElementById('status-badge');
+  const labels = { pending:'等待中', running:'运行中', completed:'完成', partial:'部分完成', failed:'失败' };
+  const spinner = status === 'running' ? '<span class="spinner"></span> ' : '';
+  el.className = `status-badge status-${status}`;
+  el.innerHTML = `${spinner}${labels[status] || status}`;
+}
+
+function downloadResult() {
+  if (currentJobId) window.location.href = `/api/jobs/${currentJobId}/download`;
+}
+
+function downloadJobResult(jobId) {
+  window.location.href = `/api/jobs/${jobId}/download`;
+}
+
+// ── Templates ───────────────────────────────────────────────────────────────
+function downloadTemplate(name) {
+  window.location.href = `/api/templates/${name}`;
+}
+
+// ── Tabs ────────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    const names = ['config','generate'];
+    t.classList.toggle('active', names[i] === name);
+  });
+  document.getElementById('tab-config').classList.toggle('active', name === 'config');
+  document.getElementById('tab-generate').classList.toggle('active', name === 'generate');
+}
+
+// ── Utils ───────────────────────────────────────────────────────────────────
+function handleFileSelect(input, areaId, nameId) {
+  const file = input.files[0];
+  document.getElementById(nameId).textContent = file ? '✓ ' + file.name : '';
+}
+
+function showError(el, msg) { el.textContent = msg; el.style.display = 'block'; }
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fmtTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+function statusLabel(s) {
+  return { pending:'等待', running:'运行中', completed:'完成', partial:'部分完成', failed:'失败' }[s] || s;
+}
+</script>
+</body>
+</html>

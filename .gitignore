@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+data/
+output/
+output_hi3d/
+output_zh/
+*.log
+test_*.xlsx
+test_output_tmp/

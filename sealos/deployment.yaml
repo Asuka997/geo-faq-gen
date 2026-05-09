@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: faq-generator
+  labels:
+    app: faq-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: faq-generator
+  template:
+    metadata:
+      labels:
+        app: faq-generator
+    spec:
+      containers:
+        - name: faq-generator
+          image: ghcr.io/asuka997/geo-faq-gen:main
+          ports:
+            - containerPort: 8000
+          env:
+            - name: GOOGLE_CLOUD_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: faq-secrets
+                  key: GOOGLE_CLOUD_API_KEY
+            - name: DATA_DIR
+              value: /data
+          volumeMounts:
+            - name: faq-data
+              mountPath: /data
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+      volumes:
+        - name: faq-data
+          persistentVolumeClaim:
+            claimName: faq-data-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: faq-generator-svc
+spec:
+  selector:
+    app: faq-generator
+  ports:
+    - port: 80
+      targetPort: 8000
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: faq-data-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

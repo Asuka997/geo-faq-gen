@@ -1,0 +1,15 @@
+{
+  "core_pages": [
+    { "label": "Homepage", "url": "https://www.example.com/" },
+    { "label": "Pricing", "url": "https://www.example.com/pricing" },
+    { "label": "Blog", "url": "https://www.example.com/blog" }
+  ],
+  "feature_pages": [
+    {
+      "label": "Feature Name",
+      "url": "https://www.example.com/feature",
+      "description": "One sentence describing what this feature does.",
+      "trigger_topics": ["keyword1", "keyword2", "keyword3"]
+    }
+  ]
+}
