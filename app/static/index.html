@@ -262,6 +262,7 @@
           <label>执行步骤</label>
           <div class="steps-group">
             <label class="step-check"><input type="checkbox" id="step1" checked /> Step 1 生成回答</label>
+            <label class="step-check"><input type="checkbox" id="stepTranslate" /> Step 1.5 翻译为中文</label>
             <label class="step-check"><input type="checkbox" id="step2" checked /> Step 2 插入内链</label>
             <label class="step-check"><input type="checkbox" id="step3" checked /> Step 3 验证</label>
           </div>
@@ -464,6 +465,7 @@ async function startGeneration() {
 
   const steps = [];
   if (document.getElementById('step1').checked) steps.push(1);
+  if (document.getElementById('stepTranslate').checked) steps.push('translate');
   if (document.getElementById('step2').checked) steps.push(2);
   if (document.getElementById('step3').checked) steps.push(3);
   if (!steps.length) { showError(errEl, '请至少选择一个步骤'); return; }

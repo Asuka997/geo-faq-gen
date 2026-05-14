@@ -18,6 +18,17 @@ from google.genai import types
 
 logger = logging.getLogger("faq_pipeline")
 
+_SAFETY_OFF = [
+    types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,       threshold=types.HarmBlockThreshold.OFF),
+    types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,  threshold=types.HarmBlockThreshold.OFF),
+    types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,  threshold=types.HarmBlockThreshold.OFF),
+    types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,         threshold=types.HarmBlockThreshold.OFF),
+]
+
+_TRANSLATE_PROMPT = """Translate the following English FAQ answer into Simplified Chinese.
+Keep ALL Markdown formatting, placeholders like {{URL_0}}, and technical terms (3D, API, PBR, STL, OBJ) in English.
+Output translated content only. No commentary."""
+
 
 # ── Prompt builders ──────────────────────────────────────────────────────────
 
@@ -155,6 +166,7 @@ def _generate_one(
                 system_instruction=step1_prompt,
                 temperature=0.7,
                 max_output_tokens=16384,
+                safety_settings=_SAFETY_OFF,
             ),
         )
         raw = re.sub(r"^```[a-z]*\n?|```$", "", response.text.strip(), flags=re.MULTILINE).strip()
@@ -215,6 +227,7 @@ def _insert_link_one(
                 temperature=0.3,
                 max_output_tokens=1024,
                 thinking_config=types.ThinkingConfig(thinking_budget=0),
+                safety_settings=_SAFETY_OFF,
             ),
         )
     except Exception as e:
@@ -240,6 +253,114 @@ def _insert_link_one(
 
     md_path.write_text(content.replace(original, replacement, 1), encoding="utf-8")
     return "ok"
+
+
+# ── Translation helpers ──────────────────────────────────────────────────────
+
+def _extract_links(content: str) -> tuple[str, dict[str, str]]:
+    mapping: dict[str, str] = {}
+    def _replace(m: re.Match) -> str:
+        anchor, url = m.group(1), m.group(2)
+        key = f"URL_{len(mapping)}"
+        mapping[key] = url
+        return f"[{anchor}]({{{{{key}}}}})"
+    protected = re.sub(r'\[([^\]]*)\]\((https?://[^)]+)\)', _replace, content)
+    return protected, mapping
+
+
+def _restore_links(content: str, mapping: dict[str, str]) -> str:
+    for key, url in mapping.items():
+        content = content.replace(f"{{{{{key}}}}}", url)
+    return content
+
+
+def _has_chinese(text: str) -> bool:
+    return bool(re.search(r'[一-鿿]', text))
+
+
+def _translate_one(
+    md_path: Path,
+    client: genai.Client,
+) -> tuple[bool, Optional[str]]:
+    content = md_path.read_text(encoding="utf-8")
+    first_nonempty = next((l for l in content.splitlines() if l.strip()), "")
+    if _has_chinese(first_nonempty):
+        return True, None  # already translated
+
+    protected, mapping = _extract_links(content)
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=protected,
+            config=types.GenerateContentConfig(
+                system_instruction=_TRANSLATE_PROMPT,
+                temperature=0.3,
+                max_output_tokens=8192,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+                safety_settings=_SAFETY_OFF,
+            ),
+        )
+    except Exception as e:
+        return False, str(e)
+
+    translated = _restore_links(response.text.strip(), mapping)
+    tmp = md_path.with_suffix(".md.tmp")
+    tmp.write_text(translated, encoding="utf-8")
+    os.replace(tmp, md_path)
+    return True, None
+
+
+def _translate_link_map(link_map: dict, client: genai.Client) -> dict:
+    """Return a copy of link_map with trigger_topics translated to Chinese."""
+    all_topics: list[str] = []
+    for page in link_map.get("core_pages", []) + link_map.get("feature_pages", []):
+        all_topics.extend(page.get("trigger_topics", []))
+
+    if not all_topics:
+        return link_map
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=json.dumps(all_topics, ensure_ascii=False),
+            config=types.GenerateContentConfig(
+                system_instruction=(
+                    "Translate each English phrase in this JSON array into Simplified Chinese. "
+                    "Return a JSON array of the same length in the same order. No explanation."
+                ),
+                temperature=0,
+                max_output_tokens=4096,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+                safety_settings=_SAFETY_OFF,
+            ),
+        )
+        raw = re.sub(r"^```[a-z]*\n?|```$", "", response.text.strip(), flags=re.MULTILINE).strip()
+        cn_topics: list[str] = json.loads(raw)
+    except Exception as e:
+        logger.warning("_translate_link_map failed (%s), using original", e)
+        return link_map
+
+    if len(cn_topics) != len(all_topics):
+        logger.warning("_translate_link_map topic count mismatch, using original")
+        return link_map
+
+    idx = 0
+
+    def _translate_pages(pages: list[dict]) -> list[dict]:
+        nonlocal idx
+        result = []
+        for page in pages:
+            topics = page.get("trigger_topics", [])
+            new_page = {**page, "trigger_topics": cn_topics[idx: idx + len(topics)]}
+            idx += len(topics)
+            result.append(new_page)
+        return result
+
+    return {
+        **link_map,
+        "core_pages": _translate_pages(link_map.get("core_pages", [])),
+        "feature_pages": _translate_pages(link_map.get("feature_pages", [])),
+    }
 
 
 # ── Step 3: Validation ───────────────────────────────────────────────────────
@@ -292,17 +413,18 @@ def run_pipeline(
     brand_features: dict,
     api_key: str,
     workers: int,
-    steps: list[int],
+    steps: list,
     progress_callback: Callable[[int, int, int], None],  # (done, total, failed)
 ) -> None:
     """Run the full pipeline. Writes results to output_dir as it goes.
 
+    steps may contain ints (1, 2, 3) and/or the string "translate".
     Always collects partial results — never raises, logs errors instead.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     client = genai.Client(api_key=api_key)
     step1_prompt = _build_step1_prompt(brand_features)
-    link_map_text = build_link_map_text(link_map)
+    active_link_map = link_map
     model_id = brand_features.get("model_id", "gemini-2.5-pro")
 
     total = len(questions)
@@ -326,10 +448,28 @@ def run_pipeline(
                     logger.warning("Step1 FAIL [%s]: %s", futures[future], err)
                 progress_callback(done, total, failed)
 
-    if 2 in steps:
+    if "translate" in steps:
+        active_link_map = _translate_link_map(link_map, client)
         md_files = sorted(f for f in output_dir.glob("*.md") if not f.name.startswith("_"))
-        step2_done = 0
-        step2_total = len(md_files)
+        tr_total = len(md_files)
+        tr_done = 0
+        tr_failed = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            futures_tr = {executor.submit(_translate_one, f, client): f for f in md_files}
+            for future in concurrent.futures.as_completed(futures_tr):
+                try:
+                    success, err = future.result()
+                except Exception as e:
+                    success, err = False, str(e)
+                tr_done += 1
+                if not success:
+                    tr_failed += 1
+                    logger.warning("Translate FAIL [%s]: %s", futures_tr[future].name, err)
+                progress_callback(tr_done, tr_total, tr_failed)
+
+    if 2 in steps:
+        link_map_text = build_link_map_text(active_link_map)
+        md_files = sorted(f for f in output_dir.glob("*.md") if not f.name.startswith("_"))
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             futures2 = {executor.submit(_insert_link_one, f, client, link_map_text): f for f in md_files}
             for future in concurrent.futures.as_completed(futures2):
@@ -337,7 +477,6 @@ def run_pipeline(
                     future.result()
                 except Exception as e:
                     logger.warning("Step2 exception: %s", e)
-                step2_done += 1
 
     if 3 in steps:
         approved_urls = get_approved_urls(link_map)

@@ -19,7 +19,7 @@ def _job_dir(project_id: str, job_id: str) -> Path:
     return _project_dir(project_id) / "jobs" / job_id
 
 
-def _run_job(job_id: str, project_id: str, questions: list[str], questions_map: dict, steps: list[int], workers: int) -> None:
+def _run_job(job_id: str, project_id: str, questions: list[str], questions_map: dict, steps: list, workers: int) -> None:
     pdir = _project_dir(project_id)
     jdir = _job_dir(project_id, job_id)
     output_dir = jdir / "output"
@@ -97,7 +97,7 @@ async def create_job(
     if not questions:
         raise HTTPException(status_code=400, detail="Excel中未找到有效问题")
 
-    step_list = [int(s.strip()) for s in steps.split(",") if s.strip().isdigit()]
+    step_list = [int(s.strip()) if s.strip().isdigit() else s.strip() for s in steps.split(",") if s.strip()]
     job_id = str(uuid.uuid4())[:12]
     jdir = _job_dir(project_id, job_id)
     jdir.mkdir(parents=True, exist_ok=True)
