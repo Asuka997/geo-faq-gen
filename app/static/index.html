@@ -283,6 +283,8 @@
         </div>
         <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap">
           <button class="btn btn-primary" id="download-btn" style="display:none" onclick="downloadResult()">⬇ 下载结果 Excel</button>
+          <button class="btn btn-secondary" id="download-en-btn" style="display:none" onclick="downloadResult('en')">⬇ 下载英文版</button>
+          <button class="btn btn-secondary" id="download-zh-btn" style="display:none" onclick="downloadResult('zh')">⬇ 下载中文版</button>
         </div>
       </div>
 
@@ -495,6 +497,8 @@ async function startGeneration() {
 function showProgressCard(total) {
   document.getElementById('progress-card').style.display = 'block';
   document.getElementById('download-btn').style.display = 'none';
+  document.getElementById('download-en-btn').style.display = 'none';
+  document.getElementById('download-zh-btn').style.display = 'none';
   document.getElementById('prog-fill').style.width = '0%';
   document.getElementById('prog-text').textContent = `0 / ${total} 题`;
   updateStatusBadge('running');
@@ -522,7 +526,15 @@ function updateProgress(job) {
   document.getElementById('prog-text').textContent =
     `已完成 ${job.success_count + job.failed_count} / ${job.total} 题（失败 ${job.failed_count} 题）`;
   updateStatusBadge(job.status);
-  if (job.has_results) document.getElementById('download-btn').style.display = 'inline-flex';
+  if (job.has_results) {
+    const hasTranslate = document.getElementById('stepTranslate').checked;
+    if (hasTranslate) {
+      document.getElementById('download-en-btn').style.display = 'inline-flex';
+      document.getElementById('download-zh-btn').style.display = 'inline-flex';
+    } else {
+      document.getElementById('download-btn').style.display = 'inline-flex';
+    }
+  }
 }
 
 function updateStatusBadge(status) {
@@ -533,8 +545,11 @@ function updateStatusBadge(status) {
   el.innerHTML = `${spinner}${labels[status] || status}`;
 }
 
-function downloadResult() {
-  if (currentJobId) window.location.href = `/api/jobs/${currentJobId}/download`;
+function downloadResult(lang = '') {
+  if (currentJobId) {
+    const url = lang ? `/api/jobs/${currentJobId}/download?lang=${lang}` : `/api/jobs/${currentJobId}/download`;
+    window.location.href = url;
+  }
 }
 
 function downloadJobResult(jobId) {

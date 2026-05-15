@@ -49,12 +49,23 @@ def _run_job(job_id: str, project_id: str, questions: list[str], questions_map: 
         job_store.update_job(job_id, error=str(e))
     finally:
         # Always collect whatever results exist
-        df = excel_io.collect_results(output_dir, questions_map)
-        result_path = jdir / "result.xlsx"
+        has_translation = "translate" in steps
         has_results = False
-        if not df.empty:
-            excel_io.save_result_excel(df, result_path)
-            has_results = True
+
+        if has_translation:
+            df_en = excel_io.collect_results(output_dir, questions_map, english=True)
+            df_zh = excel_io.collect_results(output_dir, questions_map, english=False)
+            if not df_en.empty:
+                excel_io.save_result_excel(df_en, jdir / "result_en.xlsx")
+                has_results = True
+            if not df_zh.empty:
+                excel_io.save_result_excel(df_zh, jdir / "result_zh.xlsx")
+                has_results = True
+        else:
+            df = excel_io.collect_results(output_dir, questions_map)
+            if not df.empty:
+                excel_io.save_result_excel(df, jdir / "result.xlsx")
+                has_results = True
 
         job = job_store.get_job(job_id)
         if job:
@@ -150,17 +161,29 @@ async def stream_job(job_id: str):
 
 
 @router.get("/jobs/{job_id}/download")
-def download_result(job_id: str):
+def download_result(job_id: str, lang: str = ""):
     job = job_store.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    result_path = _job_dir(job.project_id, job_id) / "result.xlsx"
+    jdir = _job_dir(job.project_id, job_id)
+    if lang == "en":
+        result_path = jdir / "result_en.xlsx"
+        filename = f"faq_result_{job_id}_en.xlsx"
+    elif lang == "zh":
+        result_path = jdir / "result_zh.xlsx"
+        filename = f"faq_result_{job_id}_zh.xlsx"
+    else:
+        result_path = jdir / "result.xlsx"
+        if not result_path.exists():
+            result_path = jdir / "result_zh.xlsx"
+        filename = f"faq_result_{job_id}.xlsx"
+
     if not result_path.exists():
         raise HTTPException(status_code=404, detail="结果文件尚未生成")
 
     return FileResponse(
         path=str(result_path),
-        filename=f"faq_result_{job_id}.xlsx",
+        filename=filename,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )

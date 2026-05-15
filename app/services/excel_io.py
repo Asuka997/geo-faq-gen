@@ -26,19 +26,29 @@ def _question_to_seo_title(question: str) -> str:
     return q[:70]
 
 
-def collect_results(output_dir: Path, questions_map: dict[str, str]) -> pd.DataFrame:
-    """Collect all generated .md files into a DataFrame.
+def collect_results(output_dir: Path, questions_map: dict[str, str], english: bool = False) -> pd.DataFrame:
+    """Collect generated content into a DataFrame.
 
+    english=True: read from .en.md / .en.meta.json backups (pre-translation English).
+    english=False (default): read from .md / .meta.json (current, may be Chinese).
     questions_map: {slug: original_question}
     """
     rows = []
-    for md_file in sorted(output_dir.glob("*.md")):
-        if md_file.name.startswith("_"):
-            continue
-        slug = md_file.stem
+    if english:
+        md_files = sorted(f for f in output_dir.glob("*.en.md") if not f.name.startswith("_"))
+    else:
+        md_files = sorted(f for f in output_dir.glob("*.md")
+                          if not f.name.startswith("_") and not f.name.endswith(".en.md"))
+    for md_file in md_files:
+        slug = md_file.name.replace(".en.md", "").replace(".md", "")
         question = questions_map.get(slug, slug.replace("-", " ").capitalize())
         answer = md_file.read_text(encoding="utf-8").strip()
-        meta_file = output_dir / f"{slug}.meta.json"
+        if english:
+            meta_file = output_dir / f"{slug}.en.meta.json"
+            if not meta_file.exists():
+                meta_file = output_dir / f"{slug}.meta.json"
+        else:
+            meta_file = output_dir / f"{slug}.meta.json"
         meta = {}
         if meta_file.exists() and meta_file.stat().st_size > 0:
             try:
@@ -51,10 +61,10 @@ def collect_results(output_dir: Path, questions_map: dict[str, str]) -> pd.DataF
             "slug": slug,
             "seo_title": seo_title,
             "answer": answer,
-            "excerpt": meta.get("excerpt", ""),
+            "description": meta.get("description") or meta.get("excerpt", ""),
             "keywords": ", ".join(meta.get("keywords", [])),
         })
-    return pd.DataFrame(rows, columns=["question", "slug", "seo_title", "answer", "excerpt", "keywords"])
+    return pd.DataFrame(rows, columns=["question", "slug", "seo_title", "answer", "description", "keywords"])
 
 
 def save_result_excel(df: pd.DataFrame, path: Path) -> None:

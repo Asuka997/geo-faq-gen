@@ -94,7 +94,7 @@ WRITING RULES:
    {{
      "body": "<full answer in Markdown, no hyperlinks>",
      "seo_title": "<SEO page title, 50–60 chars, primary keyword near front, no brand suffix>",
-     "excerpt": "<1–2 sentences, 120–155 chars, active voice, includes primary keyword>",
+     "description": "<1–2 sentences, 120–155 chars, active voice, includes primary keyword>",
      "keywords": ["<kw1>", "<kw2>", "<kw3>", "<kw4>"]
    }}
 
@@ -173,16 +173,16 @@ def _generate_one(
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError:
-            body_match = re.search(r'"body"\s*:\s*"(.*?)"\s*,\s*"excerpt"', raw, re.DOTALL)
+            body_match = re.search(r'"body"\s*:\s*"(.*?)"\s*,\s*"(?:excerpt|description)"', raw, re.DOTALL)
             if body_match:
                 body_text = body_match.group(1).replace('\\"', '"').replace('\\n', '\n')
-                parsed = {"body": body_text, "excerpt": "", "keywords": []}
+                parsed = {"body": body_text, "description": "", "keywords": []}
             else:
                 return False, f"JSON parse error: {raw[:80]}"
 
         body = parsed.get("body", "").strip()
         seo_title = parsed.get("seo_title", "").strip()
-        excerpt = parsed.get("excerpt", "").strip()
+        description = (parsed.get("description") or parsed.get("excerpt", "")).strip()
         keywords = parsed.get("keywords", [])
 
         if not body:
@@ -190,7 +190,7 @@ def _generate_one(
 
         tmp_md.write_text(body, encoding="utf-8")
         tmp_meta.write_text(
-            json.dumps({"seo_title": seo_title, "excerpt": excerpt, "keywords": keywords}, ensure_ascii=False, indent=2),
+            json.dumps({"seo_title": seo_title, "description": description, "keywords": keywords}, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         os.replace(tmp_md, md_path)
@@ -278,35 +278,103 @@ def _has_chinese(text: str) -> bool:
     return bool(re.search(r'[一-鿿]', text))
 
 
+_TRANSLATE_COMBINED_PROMPT = """Translate ALL English text below into Simplified Chinese.
+
+The input has two sections separated by "---META---":
+1. A Markdown FAQ answer (before ---META---)
+2. A JSON object with fields: seo_title, description, keywords (after ---META---)
+
+Return your output in exactly this format (no extra text):
+---BODY---
+<translated Markdown here>
+---META---
+<translated JSON here, same keys, keywords as a JSON array of strings>"""
+
+
 def _translate_one(
     md_path: Path,
     client: genai.Client,
 ) -> tuple[bool, Optional[str]]:
-    content = md_path.read_text(encoding="utf-8")
-    first_nonempty = next((l for l in content.splitlines() if l.strip()), "")
-    if _has_chinese(first_nonempty):
-        return True, None  # already translated
+    # Resume: skip if already translated (en backup exists)
+    en_md = md_path.with_suffix(".en.md")
+    if en_md.exists():
+        return True, None
 
+    content = md_path.read_text(encoding="utf-8")
+    meta_path = md_path.with_name(md_path.stem + ".meta.json")
+    meta: dict = {}
+    if meta_path.exists() and meta_path.stat().st_size > 0:
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    # Back up originals (English source)
+    en_md.write_text(content, encoding="utf-8")
+    en_meta_path = md_path.with_name(md_path.stem + ".en.meta.json")
+    if meta:
+        en_meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    meta_fields = {
+        "seo_title": meta.get("seo_title", ""),
+        "description": meta.get("description") or meta.get("excerpt", ""),
+        "keywords": meta.get("keywords", []),
+    }
+
+    # ── Translate body ────────────────────────────────────────────────────────
     protected, mapping = _extract_links(content)
     try:
-        response = client.models.generate_content(
+        body_resp = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=protected,
             config=types.GenerateContentConfig(
                 system_instruction=_TRANSLATE_PROMPT,
                 temperature=0.3,
-                max_output_tokens=8192,
+                max_output_tokens=10000,
                 thinking_config=types.ThinkingConfig(thinking_budget=0),
                 safety_settings=_SAFETY_OFF,
             ),
         )
+        translated_body = _restore_links(body_resp.text.strip(), mapping)
     except Exception as e:
-        return False, str(e)
+        return False, f"body: {e}"
 
-    translated = _restore_links(response.text.strip(), mapping)
     tmp = md_path.with_suffix(".md.tmp")
-    tmp.write_text(translated, encoding="utf-8")
+    tmp.write_text(translated_body, encoding="utf-8")
     os.replace(tmp, md_path)
+
+    # ── Translate meta ────────────────────────────────────────────────────────
+    if meta:
+        try:
+            meta_resp = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=json.dumps(meta_fields, ensure_ascii=False),
+                config=types.GenerateContentConfig(
+                    system_instruction=(
+                        "Translate every value in this JSON object into Simplified Chinese. "
+                        "For the 'keywords' field, return a JSON array of strings. "
+                        "Return only valid JSON with the same keys. No explanation, no markdown fences."
+                    ),
+                    temperature=0,
+                    max_output_tokens=512,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                    safety_settings=_SAFETY_OFF,
+                ),
+            )
+            raw_meta = re.sub(r"^```[a-z]*\n?|```$", "", meta_resp.text.strip(), flags=re.MULTILINE).strip()
+            translated_fields = json.loads(raw_meta)
+            kw = translated_fields.get("keywords", [])
+            if isinstance(kw, str):
+                kw = [k.strip() for k in re.split(r'[,，]', kw) if k.strip()]
+            meta_cn = {
+                "seo_title": translated_fields.get("seo_title", meta_fields["seo_title"]),
+                "description": translated_fields.get("description", meta_fields["description"]),
+                "keywords": kw,
+            }
+            meta_path.write_text(json.dumps(meta_cn, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.warning("meta translate FAIL [%s]: %s", md_path.name, e)
+
     return True, None
 
 
