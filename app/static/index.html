@@ -125,9 +125,40 @@
     .container { padding: 16px; }
     .project-grid { grid-template-columns: 1fr; }
   }
+
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+  .modal-overlay.hidden { display: none; }
+  .modal-box { background: #fff; border-radius: 12px; padding: 28px 32px; max-width: 420px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,.18); }
+  .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 10px; }
+  .modal-body { font-size: 14px; color: #555; margin-bottom: 24px; line-height: 1.6; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+  /* Error log */
+  .error-log { margin-top: 16px; }
+  .error-log summary { font-size: 13px; font-weight: 600; color: #dc2626; cursor: pointer; user-select: none; }
+  .error-log-body { margin-top: 8px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px; max-height: 200px; overflow-y: auto; }
+  .error-log-body pre { font-size: 12px; color: #7f1d1d; white-space: pre-wrap; word-break: break-all; margin: 0; }
+
+  /* Project card delete */
+  .project-card-wrap { position: relative; }
+  .project-card-wrap .del-btn { position: absolute; top: 10px; right: 10px; background: none; border: none; color: #ccc; font-size: 16px; cursor: pointer; line-height: 1; padding: 2px 5px; border-radius: 4px; }
+  .project-card-wrap .del-btn:hover { color: #dc2626; background: #fef2f2; }
 </style>
 </head>
 <body>
+
+<!-- ── Confirm Modal ── -->
+<div class="modal-overlay hidden" id="confirm-modal">
+  <div class="modal-box">
+    <div class="modal-title" id="modal-title">确认删除</div>
+    <div class="modal-body" id="modal-body">此操作不可恢复，确认继续？</div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+      <button class="btn btn-danger" id="modal-confirm-btn" onclick="modalConfirm()">确认删除</button>
+    </div>
+  </div>
+</div>
 
 <div class="header">
   <span class="header-logo">FAQ 生成系统</span>
@@ -166,20 +197,22 @@
       <div class="form-group">
         <label>Link Map 文件 * <span style="font-weight:400;color:#888">（定义内链目标页面）</span></label>
         <div class="upload-area" id="linkmap-area">
-          <input type="file" id="new-linkmap" accept=".json" onchange="handleFileSelect(this,'linkmap-area','linkmap-name')" />
+          <input type="file" id="new-linkmap" accept=".json" onchange="handleFileSelectWithValidation(this,'linkmap-area','linkmap-name','linkmap-file-error','linkmap')" />
           <div class="upload-text">点击或拖拽上传 linkmap.json</div>
           <div class="upload-file-name" id="linkmap-name"></div>
         </div>
+        <div id="linkmap-file-error" class="alert alert-error" style="display:none;margin-top:6px"></div>
         <div class="template-link" onclick="downloadTemplate('linkmap_template.json')">⬇ 下载模板</div>
       </div>
 
       <div class="form-group">
         <label>Brand Features 文件 * <span style="font-weight:400;color:#888">（定义品牌特性和写作规则）</span></label>
         <div class="upload-area" id="brand-area">
-          <input type="file" id="new-brand" accept=".json" onchange="handleFileSelect(this,'brand-area','brand-name')" />
+          <input type="file" id="new-brand" accept=".json" onchange="handleFileSelectWithValidation(this,'brand-area','brand-name','brand-file-error','brand_features')" />
           <div class="upload-text">点击或拖拽上传 brand_features.json</div>
           <div class="upload-file-name" id="brand-name"></div>
         </div>
+        <div id="brand-file-error" class="alert alert-error" style="display:none;margin-top:6px"></div>
         <div class="template-link" onclick="downloadTemplate('brand_features_template.json')">⬇ 下载模板</div>
       </div>
 
@@ -212,6 +245,7 @@
               重新上传
               <input type="file" accept=".json" style="display:none" onchange="updateConfig(this,'linkmap')" />
             </label>
+            <div class="template-link" onclick="downloadProjectFile('linkmap.json')">⬇ 查看当前文件</div>
             <div class="template-link" onclick="downloadTemplate('linkmap_template.json')">⬇ 下载模板</div>
           </div>
         </div>
@@ -226,8 +260,17 @@
               重新上传
               <input type="file" accept=".json" style="display:none" onchange="updateConfig(this,'brand_features')" />
             </label>
+            <div class="template-link" onclick="downloadProjectFile('brand_features.json')">⬇ 查看当前文件</div>
             <div class="template-link" onclick="downloadTemplate('brand_features_template.json')">⬇ 下载模板</div>
           </div>
+        </div>
+        <hr class="divider" />
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="flex:1">
+            <div style="font-weight:600;margin-bottom:4px">品牌中文名 <span style="font-weight:400;color:#888">（用于中文翻译，可选）</span></div>
+            <input type="text" id="brand-name-cn-input" placeholder="例：海天3D" style="width:100%;max-width:300px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:14px;margin-top:4px" />
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="saveBrandNameCn()" style="margin-left:12px">保存</button>
         </div>
       </div>
 
@@ -286,6 +329,10 @@
           <button class="btn btn-secondary" id="download-en-btn" style="display:none" onclick="downloadResult('en')">⬇ 下载英文版</button>
           <button class="btn btn-secondary" id="download-zh-btn" style="display:none" onclick="downloadResult('zh')">⬇ 下载中文版</button>
         </div>
+        <details class="error-log" id="error-log-wrap" style="display:none">
+          <summary id="error-log-summary">错误日志 (0)</summary>
+          <div class="error-log-body"><pre id="error-log-pre"></pre></div>
+        </details>
       </div>
 
       <!-- Jobs History -->
@@ -302,6 +349,18 @@
 let currentProjectId = null;
 let currentJobId = null;
 let sseSource = null;
+
+// ── Modal ───────────────────────────────────────────────────────────────────
+let _modalAction = null;
+function showModal(title, body, onConfirm) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').textContent = body;
+  _modalAction = onConfirm;
+  document.getElementById('confirm-modal').classList.remove('hidden');
+}
+function closeModal() { document.getElementById('confirm-modal').classList.add('hidden'); _modalAction = null; }
+function modalConfirm() { closeModal(); if (_modalAction) _modalAction(); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
 // ── Router ─────────────────────────────────────────────────────────────────
 function navigate(route, id) {
@@ -332,11 +391,21 @@ async function loadProjects() {
     const res = await fetch('/api/projects');
     const projects = await res.json();
     projects.forEach(p => {
+      const wrap = document.createElement('div');
+      wrap.className = 'project-card-wrap';
       const card = document.createElement('div');
       card.className = 'project-card';
+      card.style.paddingRight = '36px';
       card.innerHTML = `<h3>${escHtml(p.name)}</h3><div class="meta">ID: ${p.id}</div>`;
       card.onclick = () => navigate('project', p.id);
-      grid.appendChild(card);
+      const delBtn = document.createElement('button');
+      delBtn.className = 'del-btn';
+      delBtn.title = '删除项目';
+      delBtn.textContent = '✕';
+      delBtn.onclick = (e) => { e.stopPropagation(); confirmDeleteProjectFromHome(p.id, p.name); };
+      wrap.appendChild(card);
+      wrap.appendChild(delBtn);
+      grid.appendChild(wrap);
     });
   } catch(e) {
     console.error(e);
@@ -354,6 +423,7 @@ async function loadProject(id) {
     // Config status
     setConfigStatus('linkmap-status', p.has_linkmap);
     setConfigStatus('brand-status', p.has_brand_features);
+    document.getElementById('brand-name-cn-input').value = p.brand_name_cn || '';
 
     // Jobs history
     renderJobsHistory(p.jobs || []);
@@ -384,11 +454,12 @@ function renderJobsHistory(jobs) {
   if (!jobs.length) { container.style.display = 'none'; return; }
   container.style.display = 'block';
   list.innerHTML = jobs.slice(0, 10).map(j => `
-    <div class="job-row">
+    <div class="job-row" id="job-row-${j.id}">
       <span class="job-time">${fmtTime(j.created_at)}</span>
       <span class="status-badge status-${j.status}">${statusLabel(j.status)}</span>
       <span style="color:#555">${j.success_count}/${j.total} 题</span>
       ${j.has_results ? `<button class="btn btn-secondary btn-sm" onclick="downloadJobResult('${j.id}')">⬇ 下载</button>` : ''}
+      ${j.status !== 'running' ? `<button class="btn btn-danger btn-sm" onclick="confirmDeleteJob('${j.id}')">删除</button>` : ''}
     </div>
   `).join('');
 }
@@ -401,6 +472,8 @@ function resetNewForm() {
   document.getElementById('linkmap-name').textContent = '';
   document.getElementById('brand-name').textContent = '';
   document.getElementById('new-error').style.display = 'none';
+  document.getElementById('linkmap-file-error').style.display = 'none';
+  document.getElementById('brand-file-error').style.display = 'none';
 }
 
 async function submitNewProject() {
@@ -413,6 +486,14 @@ async function submitNewProject() {
   if (!name) { showError(errEl, '请填写项目名称'); return; }
   if (!linkmapFile) { showError(errEl, '请上传 linkmap.json'); return; }
   if (!brandFile) { showError(errEl, '请上传 brand_features.json'); return; }
+
+  // Block submit if inline file errors are visible
+  if (document.getElementById('linkmap-file-error').style.display !== 'none') {
+    showError(errEl, 'linkmap.json 格式不正确，请重新上传'); return;
+  }
+  if (document.getElementById('brand-file-error').style.display !== 'none') {
+    showError(errEl, 'brand_features.json 格式不正确，请重新上传'); return;
+  }
 
   const btn = document.getElementById('new-submit-btn');
   btn.disabled = true; btn.textContent = '创建中...';
@@ -435,12 +516,27 @@ async function submitNewProject() {
 }
 
 // ── Config Updates ──────────────────────────────────────────────────────────
+async function saveBrandNameCn() {
+  const val = document.getElementById('brand-name-cn-input').value.trim();
+  const fd = new FormData();
+  fd.append('brand_name_cn', val);
+  try {
+    const res = await fetch(`/api/projects/${currentProjectId}/brand_name_cn`, { method: 'PUT', body: fd });
+    if (res.ok) alert(val ? `已保存：${val}` : '已清除品牌中文名');
+    else alert('保存失败');
+  } catch(e) {
+    alert('网络错误');
+  }
+}
+
 async function updateConfig(input, type) {
   const file = input.files[0];
   if (!file) return;
+  const fileType = type === 'linkmap' ? 'linkmap' : 'brand_features';
+  const clientErr = await validateJsonFile(file, fileType);
+  if (clientErr) { alert(`文件格式错误：${clientErr}`); input.value = ''; return; }
   const fd = new FormData();
-  const fieldName = type === 'linkmap' ? 'linkmap' : 'brand_features';
-  fd.append(fieldName, file);
+  fd.append(fileType, file);
   try {
     const res = await fetch(`/api/projects/${currentProjectId}/${type}`, { method: 'PUT', body: fd });
     const data = await res.json();
@@ -451,10 +547,31 @@ async function updateConfig(input, type) {
   }
 }
 
-async function deleteProject() {
-  if (!confirm(`确认删除项目？此操作不可恢复。`)) return;
-  await fetch(`/api/projects/${currentProjectId}`, { method: 'DELETE' });
-  navigate('home');
+function deleteProject() {
+  showModal('删除项目', '确认删除此项目？所有任务数据将一并删除，此操作不可恢复。', async () => {
+    await fetch(`/api/projects/${currentProjectId}`, { method: 'DELETE' });
+    navigate('home');
+  });
+}
+
+function confirmDeleteProjectFromHome(id, name) {
+  showModal('删除项目', `确认删除项目「${name}」？所有任务数据将一并删除，此操作不可恢复。`, async () => {
+    await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+    loadProjects();
+  });
+}
+
+function confirmDeleteJob(jobId) {
+  showModal('删除任务', '确认删除此任务记录？输出文件将被清除，此操作不可恢复。', async () => {
+    const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+    if (res.ok) {
+      const row = document.getElementById(`job-row-${jobId}`);
+      if (row) row.remove();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      alert(data.detail || '删除失败');
+    }
+  });
 }
 
 // ── Generation ──────────────────────────────────────────────────────────────
@@ -501,6 +618,8 @@ function showProgressCard(total) {
   document.getElementById('download-zh-btn').style.display = 'none';
   document.getElementById('prog-fill').style.width = '0%';
   document.getElementById('prog-text').textContent = `0 / ${total} 题`;
+  document.getElementById('error-log-wrap').style.display = 'none';
+  document.getElementById('error-log-pre').textContent = '';
   updateStatusBadge('running');
 }
 
@@ -535,6 +654,16 @@ function updateProgress(job) {
       document.getElementById('download-btn').style.display = 'inline-flex';
     }
   }
+  // Error log
+  const log = job.error_log || [];
+  const wrap = document.getElementById('error-log-wrap');
+  if (log.length > 0) {
+    wrap.style.display = 'block';
+    document.getElementById('error-log-summary').textContent = `错误日志 (${log.length})`;
+    document.getElementById('error-log-pre').textContent = log.join('\n');
+  } else {
+    wrap.style.display = 'none';
+  }
 }
 
 function updateStatusBadge(status) {
@@ -556,9 +685,51 @@ function downloadJobResult(jobId) {
   window.location.href = `/api/jobs/${jobId}/download`;
 }
 
-// ── Templates ───────────────────────────────────────────────────────────────
+// ── File validation (client-side) ────────────────────────────────────────────
+async function validateJsonFile(file, type) {
+  let data;
+  try {
+    const text = await file.text();
+    data = JSON.parse(text);
+  } catch(e) {
+    return `不是合法的 JSON（${e.message}）`;
+  }
+  if (typeof data !== 'object' || Array.isArray(data) || data === null)
+    return '顶层必须是 JSON 对象（{}）';
+  if (type === 'linkmap') {
+    if (!('feature_pages' in data)) return '缺少 feature_pages 字段';
+    const fp = data.feature_pages;
+    if (!Array.isArray(fp)) return 'feature_pages 必须是数组';
+    if (fp.length === 0) return 'feature_pages 不能为空，请至少添加一个页面';
+    for (let i = 0; i < fp.length; i++) {
+      if (!fp[i] || typeof fp[i] !== 'object') return `feature_pages[${i}] 必须是对象`;
+      if (!fp[i].url) return `feature_pages[${i}] 缺少 url 字段`;
+      if (!('trigger_topics' in fp[i]) || !Array.isArray(fp[i].trigger_topics))
+        return `feature_pages[${i}] 缺少 trigger_topics 数组`;
+    }
+  } else if (type === 'brand_features') {
+    if (!data.brand_name && !data.name) return '缺少 brand_name（或 name）字段';
+    if (!('features' in data)) return '缺少 features 字段';
+    const features = data.features;
+    if (!Array.isArray(features)) return 'features 必须是数组';
+    if (features.length === 0) return 'features 不能为空，请至少添加一个功能项';
+    for (let i = 0; i < features.length; i++) {
+      if (!features[i] || typeof features[i] !== 'object') return `features[${i}] 必须是对象`;
+      if (!features[i].name) return `features[${i}] 缺少 name 字段`;
+      if (!('trigger_topics' in features[i]) || !Array.isArray(features[i].trigger_topics))
+        return `features[${i}] 缺少 trigger_topics 数组`;
+    }
+  }
+  return '';
+}
+
+// ── Templates & file downloads ───────────────────────────────────────────────
 function downloadTemplate(name) {
   window.location.href = `/api/templates/${name}`;
+}
+
+function downloadProjectFile(filename) {
+  window.location.href = `/api/projects/${currentProjectId}/files/${filename}`;
 }
 
 // ── Tabs ────────────────────────────────────────────────────────────────────
@@ -575,6 +746,28 @@ function switchTab(name) {
 function handleFileSelect(input, areaId, nameId) {
   const file = input.files[0];
   document.getElementById(nameId).textContent = file ? '✓ ' + file.name : '';
+}
+
+async function handleFileSelectWithValidation(input, areaId, nameId, errorId, fileType) {
+  const file = input.files[0];
+  const nameEl = document.getElementById(nameId);
+  const errEl = document.getElementById(errorId);
+  const area = document.getElementById(areaId);
+  if (!file) { nameEl.textContent = ''; errEl.style.display = 'none'; return; }
+
+  const err = await validateJsonFile(file, fileType);
+  if (err) {
+    nameEl.textContent = '✗ ' + file.name;
+    nameEl.style.color = '#dc2626';
+    area.style.borderColor = '#dc2626';
+    showError(errEl, `格式错误：${err}`);
+    input.value = '';
+  } else {
+    nameEl.textContent = '✓ ' + file.name;
+    nameEl.style.color = '';
+    area.style.borderColor = '';
+    errEl.style.display = 'none';
+  }
 }
 
 function showError(el, msg) { el.textContent = msg; el.style.display = 'block'; }

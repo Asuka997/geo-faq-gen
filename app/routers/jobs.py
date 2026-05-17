@@ -27,12 +27,17 @@ def _run_job(job_id: str, project_id: str, questions: list[str], questions_map: 
 
     link_map = json.loads((pdir / "linkmap.json").read_text(encoding="utf-8"))
     brand_features = json.loads((pdir / "brand_features.json").read_text(encoding="utf-8"))
+    cn_path = pdir / "brand_name_cn.txt"
+    brand_name_cn = cn_path.read_text(encoding="utf-8").strip() if cn_path.exists() else ""
     api_key = os.getenv("GOOGLE_CLOUD_API_KEY", "")
 
     job_store.update_job(job_id, status="running")
 
     def progress_callback(done: int, total: int, failed: int) -> None:
         job_store.update_job(job_id, success_count=done - failed, failed_count=failed)
+
+    def error_log_callback(msg: str) -> None:
+        job_store.append_error_log(job_id, msg)
 
     try:
         pipeline.run_pipeline(
@@ -44,6 +49,8 @@ def _run_job(job_id: str, project_id: str, questions: list[str], questions_map: 
             workers=workers,
             steps=steps,
             progress_callback=progress_callback,
+            brand_name_cn=brand_name_cn,
+            error_log_callback=error_log_callback,
         )
     except Exception as e:
         job_store.update_job(job_id, error=str(e))
@@ -158,6 +165,21 @@ async def stream_job(job_id: str):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.delete("/jobs/{job_id}")
+def delete_job(job_id: str):
+    job = job_store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status == "running":
+        raise HTTPException(status_code=400, detail="无法删除运行中的任务")
+    import shutil
+    jdir = _job_dir(job.project_id, job_id)
+    if jdir.exists():
+        shutil.rmtree(jdir)
+    job_store.delete_job(job_id)
+    return {"ok": True}
 
 
 @router.get("/jobs/{job_id}/download")

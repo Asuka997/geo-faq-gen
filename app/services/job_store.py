@@ -15,6 +15,7 @@ class Job:
     completed_at: Optional[float] = None
     error: Optional[str] = None
     has_results: bool = False  # True if result.xlsx exists
+    error_log: list = field(default_factory=list)  # per-item error messages
 
     def to_dict(self) -> dict:
         return {
@@ -28,6 +29,7 @@ class Job:
             "completed_at": self.completed_at,
             "error": self.error,
             "has_results": self.has_results,
+            "error_log": self.error_log,
         }
 
 
@@ -53,6 +55,21 @@ def update_job(job_id: str, **kwargs) -> None:
         if job:
             for k, v in kwargs.items():
                 setattr(job, k, v)
+
+
+def append_error_log(job_id: str, msg: str) -> None:
+    with _lock:
+        job = _store.get(job_id)
+        if job:
+            job.error_log.append(msg)
+
+
+def delete_job(job_id: str) -> bool:
+    with _lock:
+        if job_id in _store:
+            del _store[job_id]
+            return True
+        return False
 
 
 def list_jobs_for_project(project_id: str) -> list[dict]:

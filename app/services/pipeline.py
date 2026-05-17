@@ -18,6 +18,39 @@ from google.genai import types
 
 logger = logging.getLogger("faq_pipeline")
 
+_RETRYABLE_CODES = {429, 500, 502, 503, 504}
+
+
+def _generate_with_retry(client: genai.Client, max_retries: int = 4, **kwargs):
+    """Call client.models.generate_content with exponential backoff on transient errors."""
+    delay = 5
+    for attempt in range(max_retries + 1):
+        try:
+            return client.models.generate_content(**kwargs)
+        except Exception as e:
+            msg = str(e)
+            code = None
+            # Extract HTTP status code from error message if present
+            m = re.search(r'\b(429|500|502|503|504)\b', msg)
+            if m:
+                code = int(m.group(1))
+            is_retryable = (
+                code in _RETRYABLE_CODES
+                or "UNAVAILABLE" in msg
+                or "RESOURCE_EXHAUSTED" in msg
+                or "overloaded" in msg.lower()
+                or "SSL" in msg
+                or "EOF occurred" in msg
+                or "Connection" in msg
+                or "timeout" in msg.lower()
+            )
+            if is_retryable and attempt < max_retries:
+                wait = delay * (2 ** attempt)
+                logger.warning("API transient error (attempt %d/%d), retry in %ds: %s", attempt + 1, max_retries, wait, msg[:120])
+                time.sleep(wait)
+            else:
+                raise
+
 _SAFETY_OFF = [
     types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,       threshold=types.HarmBlockThreshold.OFF),
     types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,  threshold=types.HarmBlockThreshold.OFF),
@@ -159,7 +192,7 @@ def _generate_one(
         return True, None
 
     try:
-        response = client.models.generate_content(
+        response = _generate_with_retry(client,
             model=model_id,
             contents=f"QUESTION: {question}\n\nNow write the answer.",
             config=types.GenerateContentConfig(
@@ -183,6 +216,8 @@ def _generate_one(
         body = parsed.get("body", "").strip()
         seo_title = parsed.get("seo_title", "").strip()
         description = (parsed.get("description") or parsed.get("excerpt", "")).strip()
+        if not description:
+            description = re.sub(r'#+\s*', '', body)[:150].strip()
         keywords = parsed.get("keywords", [])
 
         if not body:
@@ -219,7 +254,7 @@ def _insert_link_one(
         return "skip"
 
     try:
-        response = client.models.generate_content(
+        response = _generate_with_retry(client,
             model="gemini-2.5-flash",
             contents=f"LINK MAP:\n{link_map_text}\n\n---\n\nFAQ ANSWER:\n{content}",
             config=types.GenerateContentConfig(
@@ -294,6 +329,7 @@ Return your output in exactly this format (no extra text):
 def _translate_one(
     md_path: Path,
     client: genai.Client,
+    brand_name_cn: str = "",
 ) -> tuple[bool, Optional[str]]:
     # Resume: skip if already translated (en backup exists)
     en_md = md_path.with_suffix(".en.md")
@@ -322,13 +358,17 @@ def _translate_one(
     }
 
     # ── Translate body ────────────────────────────────────────────────────────
+    brand_note = (
+        f'\nIMPORTANT: The brand name in this text should be translated as "{brand_name_cn}".'
+        if brand_name_cn else ""
+    )
     protected, mapping = _extract_links(content)
     try:
-        body_resp = client.models.generate_content(
+        body_resp = _generate_with_retry(client,
             model="gemini-2.5-flash",
             contents=protected,
             config=types.GenerateContentConfig(
-                system_instruction=_TRANSLATE_PROMPT,
+                system_instruction=_TRANSLATE_PROMPT + brand_note,
                 temperature=0.3,
                 max_output_tokens=10000,
                 thinking_config=types.ThinkingConfig(thinking_budget=0),
@@ -346,7 +386,7 @@ def _translate_one(
     # ── Translate meta ────────────────────────────────────────────────────────
     if meta:
         try:
-            meta_resp = client.models.generate_content(
+            meta_resp = _generate_with_retry(client,
                 model="gemini-2.5-flash",
                 contents=json.dumps(meta_fields, ensure_ascii=False),
                 config=types.GenerateContentConfig(
@@ -354,6 +394,7 @@ def _translate_one(
                         "Translate every value in this JSON object into Simplified Chinese. "
                         "For the 'keywords' field, return a JSON array of strings. "
                         "Return only valid JSON with the same keys. No explanation, no markdown fences."
+                        + brand_note
                     ),
                     temperature=0,
                     max_output_tokens=512,
@@ -388,7 +429,7 @@ def _translate_link_map(link_map: dict, client: genai.Client) -> dict:
         return link_map
 
     try:
-        response = client.models.generate_content(
+        response = _generate_with_retry(client,
             model="gemini-2.5-flash",
             contents=json.dumps(all_topics, ensure_ascii=False),
             config=types.GenerateContentConfig(
@@ -483,6 +524,8 @@ def run_pipeline(
     workers: int,
     steps: list,
     progress_callback: Callable[[int, int, int], None],  # (done, total, failed)
+    brand_name_cn: str = "",
+    error_log_callback: Optional[Callable[[str], None]] = None,
 ) -> None:
     """Run the full pipeline. Writes results to output_dir as it goes.
 
@@ -513,8 +556,32 @@ def run_pipeline(
                 done += 1
                 if not success:
                     failed += 1
-                    logger.warning("Step1 FAIL [%s]: %s", futures[future], err)
+                    msg = f"[Step1] {futures[future]}: {err}"
+                    logger.warning(msg)
+                    if error_log_callback:
+                        error_log_callback(msg)
                 progress_callback(done, total, failed)
+
+        # Fill missing keywords by carrying forward from nearest previous item
+        last_keywords: list = []
+        for q in questions:
+            slug = question_to_slug(q)
+            meta_path = output_dir / f"{slug}.meta.json"
+            if not meta_path.exists():
+                continue
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not meta.get("keywords") and last_keywords:
+                meta["keywords"] = last_keywords
+                meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+                msg = f"[Fallback] keywords carried forward for: {q}"
+                logger.info(msg)
+                if error_log_callback:
+                    error_log_callback(msg)
+            elif meta.get("keywords"):
+                last_keywords = meta["keywords"]
 
     if "translate" in steps:
         active_link_map = _translate_link_map(link_map, client)
@@ -523,7 +590,7 @@ def run_pipeline(
         tr_done = 0
         tr_failed = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-            futures_tr = {executor.submit(_translate_one, f, client): f for f in md_files}
+            futures_tr = {executor.submit(_translate_one, f, client, brand_name_cn): f for f in md_files}
             for future in concurrent.futures.as_completed(futures_tr):
                 try:
                     success, err = future.result()
@@ -532,7 +599,10 @@ def run_pipeline(
                 tr_done += 1
                 if not success:
                     tr_failed += 1
-                    logger.warning("Translate FAIL [%s]: %s", futures_tr[future].name, err)
+                    msg = f"[Translate] {futures_tr[future].name}: {err}"
+                    logger.warning(msg)
+                    if error_log_callback:
+                        error_log_callback(msg)
                 progress_callback(tr_done, tr_total, tr_failed)
 
     if 2 in steps:
