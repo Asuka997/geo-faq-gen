@@ -39,9 +39,23 @@ def collect_results(output_dir: Path, questions_map: dict[str, str], english: bo
     else:
         md_files = sorted(f for f in output_dir.glob("*.md")
                           if not f.name.startswith("_") and not f.name.endswith(".en.md"))
+
+    # Load Chinese question translations if available (only used for zh output)
+    questions_zh: dict[str, str] = {}
+    if not english:
+        zh_path = output_dir / "_questions_zh.json"
+        if zh_path.exists():
+            try:
+                questions_zh = json.loads(zh_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
     for md_file in md_files:
         slug = md_file.name.replace(".en.md", "").replace(".md", "")
-        question = questions_map.get(slug, slug.replace("-", " ").capitalize())
+        question = (
+            questions_zh.get(slug)
+            or questions_map.get(slug, slug.replace("-", " ").capitalize())
+        )
         answer = md_file.read_text(encoding="utf-8").strip()
         if english:
             meta_file = output_dir / f"{slug}.en.meta.json"

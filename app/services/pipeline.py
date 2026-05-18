@@ -419,6 +419,39 @@ def _translate_one(
     return True, None
 
 
+def _translate_questions(questions: list[str], output_dir: Path, client: genai.Client, brand_name_cn: str = "") -> None:
+    """Translate all questions to Chinese and save to _questions_zh.json. Skips if already done."""
+    zh_path = output_dir / "_questions_zh.json"
+    if zh_path.exists():
+        return
+    brand_note = f'\nIMPORTANT: The brand name should be translated as "{brand_name_cn}".' if brand_name_cn else ""
+    try:
+        response = _generate_with_retry(
+            client,
+            model="gemini-2.5-flash",
+            contents=json.dumps(questions, ensure_ascii=False),
+            config=types.GenerateContentConfig(
+                system_instruction=(
+                    "Translate each English question in this JSON array into Simplified Chinese. "
+                    "Return a JSON array of the same length in the same order. No explanation." + brand_note
+                ),
+                temperature=0,
+                max_output_tokens=8192,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+                safety_settings=_SAFETY_OFF,
+            ),
+        )
+        raw = re.sub(r"^```[a-z]*\n?|```$", "", response.text.strip(), flags=re.MULTILINE).strip()
+        translated: list[str] = json.loads(raw)
+        if len(translated) != len(questions):
+            logger.warning("_translate_questions count mismatch, skipping")
+            return
+        slug_to_zh = {question_to_slug(q): zh for q, zh in zip(questions, translated)}
+        zh_path.write_text(json.dumps(slug_to_zh, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.warning("_translate_questions failed (%s), questions will remain in English", e)
+
+
 def _translate_link_map(link_map: dict, client: genai.Client) -> dict:
     """Return a copy of link_map with trigger_topics translated to Chinese."""
     all_topics: list[str] = []
@@ -585,6 +618,7 @@ def run_pipeline(
 
     if "translate" in steps:
         active_link_map = _translate_link_map(link_map, client)
+        _translate_questions(questions, output_dir, client, brand_name_cn)
         md_files = sorted(f for f in output_dir.glob("*.md") if not f.name.startswith("_"))
         tr_total = len(md_files)
         tr_done = 0
