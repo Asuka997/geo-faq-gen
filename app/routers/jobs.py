@@ -25,8 +25,8 @@ def _run_job(job_id: str, project_id: str, questions: list[str], questions_map: 
     output_dir = jdir / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    link_map = json.loads((pdir / "linkmap.json").read_text(encoding="utf-8"))
-    brand_features = json.loads((pdir / "brand_features.json").read_text(encoding="utf-8"))
+    link_map = json.loads((pdir / "linkmap.json").read_text(encoding="utf-8-sig"))
+    brand_features = json.loads((pdir / "brand_features.json").read_text(encoding="utf-8-sig"))
     cn_path = pdir / "brand_name_cn.txt"
     brand_name_cn = cn_path.read_text(encoding="utf-8").strip() if cn_path.exists() else ""
     api_key = os.getenv("GOOGLE_CLOUD_API_KEY", "")

@@ -86,7 +86,7 @@ def _load_config(project_id: str) -> dict:
     cfg_path = _project_dir(project_id) / "config.json"
     if not cfg_path.exists():
         raise HTTPException(status_code=404, detail="Project not found")
-    return json.loads(cfg_path.read_text(encoding="utf-8"))
+    return json.loads(cfg_path.read_text(encoding="utf-8-sig"))
 
 
 def _save_config(project_id: str, config: dict) -> None:
@@ -101,7 +101,7 @@ def list_projects():
     for d in sorted(pdir.iterdir()):
         cfg = d / "config.json"
         if cfg.exists():
-            projects.append(json.loads(cfg.read_text(encoding="utf-8")))
+            projects.append(json.loads(cfg.read_text(encoding="utf-8-sig")))
     return projects
 
 
