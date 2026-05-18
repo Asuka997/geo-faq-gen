@@ -11,6 +11,10 @@ from app.services import job_store
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 
+def _strip_bom(content: bytes) -> bytes:
+    return content[3:] if content.startswith(b'\xef\xbb\xbf') else content
+
+
 def _validate_linkmap(content: bytes) -> str:
     """Returns error message or empty string if valid."""
     try:
@@ -111,8 +115,8 @@ async def create_project(
     pdir = _project_dir(project_id)
     pdir.mkdir(parents=True, exist_ok=True)
 
-    linkmap_bytes = await linkmap.read()
-    brand_bytes = await brand_features.read()
+    linkmap_bytes = _strip_bom(await linkmap.read())
+    brand_bytes = _strip_bom(await brand_features.read())
 
     linkmap_error = _validate_linkmap(linkmap_bytes)
     if linkmap_error:
@@ -153,7 +157,7 @@ async def update_brand_name_cn(project_id: str, brand_name_cn: str = Form(...)):
 @router.put("/{project_id}/linkmap")
 async def update_linkmap(project_id: str, linkmap: UploadFile = File(...)):
     _load_config(project_id)
-    content = await linkmap.read()
+    content = _strip_bom(await linkmap.read())
     err = _validate_linkmap(content)
     if err:
         raise HTTPException(status_code=400, detail=f"linkmap.json 格式错误：{err}")
